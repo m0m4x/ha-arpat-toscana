@@ -1,0 +1,25 @@
+{
+  "title": "ARPAT Toscana",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Seleziona una stazione ARPAT",
+        "description": "Seleziona una stazione della rete regionale della qualità dell'aria. I sensori NRT disponibili vengono creati automaticamente.",
+        "data": {
+          "station": "Stazione"
+        },
+        "data_description": {
+          "station": "Elenco ottenuto direttamente dalla struttura della rete di monitoraggio ARPAT."
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Impossibile collegarsi al servizio Open Data ARPAT.",
+      "invalid_station": "La stazione selezionata non è valida.",
+      "no_data": "La stazione non restituisce al momento dati NRT utilizzabili."
+    },
+    "abort": {
+      "already_configured": "Questa stazione ARPAT è già configurata."
+    }
+  }
+}

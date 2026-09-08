@@ -1,0 +1,14 @@
+{
+  "domain": "arpat_toscana",
+  "name": "ARPAT Toscana",
+  "codeowners": [
+    "@m0m4x"
+  ],
+  "config_flow": true,
+  "documentation": "https://github.com/m0m4x/ha-arpat-toscana",
+  "integration_type": "service",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/m0m4x/ha-arpat-toscana/issues",
+  "requirements": [],
+  "version": "0.1.0"
+}
