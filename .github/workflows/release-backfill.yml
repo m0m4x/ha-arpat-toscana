@@ -1,0 +1,67 @@
+name: Backfill GitHub releases
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  releases:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create v0.1.0 release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          if ! gh release view v0.1.0 --repo "$REPO" >/dev/null 2>&1; then
+            gh release create v0.1.0 \
+              --repo "$REPO" \
+              --target 13d6ed592113721a563ae52341f2dbd2f8d144be \
+              --title "ARPAT Toscana v0.1.0" \
+              --notes-file - <<'EOF'
+          Prima release pubblica di ARPAT Toscana per Home Assistant.
+
+          ### Funzionalità
+          - Config flow con selezione della stazione ARPAT.
+          - Acquisizione dei dati orari Near Real Time (NRT).
+          - Creazione dinamica dei sensori della qualità dell'aria.
+          - Supporto ai superamenti dei limiti giornalieri.
+          - Integrazione predisposta per HACS.
+
+          Fonte dati: ARPAT - Agenzia regionale per la protezione ambientale della Toscana.
+          EOF
+          fi
+
+      - name: Create v0.2.0 release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          if ! gh release view v0.2.0 --repo "$REPO" >/dev/null 2>&1; then
+            gh release create v0.2.0 \
+              --repo "$REPO" \
+              --target 52c74281f5b5eb084d5870523c0a5234dc1dbd60 \
+              --title "ARPAT Toscana v0.2.0" \
+              --notes-file - <<'EOF'
+          Seconda release di ARPAT Toscana con gestione separata delle tipologie di dato pubblicate da ARPAT.
+
+          ### Novità
+          - Selezione delle tipologie dati dal config flow.
+          - Dati orari Near Real Time (NRT).
+          - Indicatori giornalieri, incluso PM2.5 dove pubblicato da ARPAT.
+          - Superamenti dei limiti giornalieri.
+          - Options Flow per modificare le tipologie abilitate senza rimuovere la stazione.
+          - Discovery NRT corretta: vengono creati solo i parametri realmente pubblicati come dati orari.
+          - Normalizzazione `PM2dot5` → `PM2.5` negli indicatori giornalieri.
+          - Gestione distinta di `-` e `n.d.` nei dati giornalieri.
+          - Pulizia delle entità legacy e delle entità relative a dataset disabilitati.
+          - Test dei parser e aggiornamento di traduzioni, stringhe e documentazione.
+          - Brand assets ARPAT per Home Assistant/HACS.
+
+          Fonte dati: ARPAT - Agenzia regionale per la protezione ambientale della Toscana.
+          EOF
+          fi
