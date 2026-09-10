@@ -5,13 +5,15 @@ from __future__ import annotations
 from typing import Any
 from urllib.parse import quote
 
-from aiohttp import ClientError, ClientResponseError, ClientSession, ClientTimeout
+from aiohttp import ClientError, ClientSession, ClientTimeout
 
 from .const import (
     BASE_URL,
+    DAILY_BULLETIN_PATH,
     EXCEEDANCES_PATH,
     NETWORK_PATH,
-    NRT_PATH,
+    NRT_HISTORY_PATH,
+    NRT_LAST_PATH,
     REQUEST_TIMEOUT_SECONDS,
 )
 
@@ -43,7 +45,6 @@ class ArpatApi:
         if not stations:
             raise ArpatApiError("No stations returned by ARPAT")
 
-        # Difesa da eventuali duplicati del dataset.
         unique: dict[str, dict[str, Any]] = {}
         for station in stations:
             name = str(station["NOME_STAZIONE"]).strip().upper()
@@ -58,11 +59,28 @@ class ArpatApi:
             ),
         )
 
+    async def async_get_nrt_history(
+        self,
+        station: str,
+    ) -> list[dict[str, Any]]:
+        """Return all currently available NRT records for a station."""
+        station_url = quote(station, safe="-")
+        payload = await self._async_get_json(
+            NRT_HISTORY_PATH.format(station=station_url)
+        )
+
+        if not isinstance(payload, list):
+            raise ArpatApiError(
+                f"Unexpected NRT history response for station {station}"
+            )
+
+        return [item for item in payload if isinstance(item, dict)]
+
     async def async_get_nrt_last(self, station: str) -> dict[str, Any]:
         """Return the latest NRT sample for a station."""
         station_url = quote(station, safe="-")
         payload = await self._async_get_json(
-            NRT_PATH.format(station=station_url)
+            NRT_LAST_PATH.format(station=station_url)
         )
 
         if isinstance(payload, list):
@@ -78,6 +96,34 @@ class ArpatApi:
 
         raise ArpatApiError(
             f"Unexpected NRT response for station {station}"
+        )
+
+    async def async_get_latest_regional_bulletin(
+        self,
+    ) -> list[dict[str, Any]]:
+        """Return the latest regional air-quality bulletin."""
+        payload = await self._async_get_json(DAILY_BULLETIN_PATH)
+
+        if not isinstance(payload, list):
+            raise ArpatApiError("Unexpected regional bulletin response")
+
+        return [item for item in payload if isinstance(item, dict)]
+
+    async def async_get_daily_indicators(
+        self,
+        station: str,
+    ) -> dict[str, Any]:
+        """Return the station row from the latest regional bulletin."""
+        bulletin = await self.async_get_latest_regional_bulletin()
+        wanted = station.strip().upper()
+
+        for item in bulletin:
+            station_name = str(item.get("NOME_STAZIONE", "")).strip().upper()
+            if station_name == wanted:
+                return item
+
+        raise ArpatApiError(
+            f"Station {station} not found in latest regional bulletin"
         )
 
     async def async_get_daily_exceedances(
@@ -112,5 +158,5 @@ class ArpatApi:
             ) as response:
                 response.raise_for_status()
                 return await response.json(content_type=None)
-        except (ClientError, ClientResponseError, TimeoutError, ValueError) as err:
+        except (ClientError, TimeoutError, ValueError) as err:
             raise ArpatApiError(f"ARPAT request failed: {url}") from err

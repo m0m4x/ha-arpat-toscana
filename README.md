@@ -4,22 +4,21 @@
 [![HACS validation](https://github.com/m0m4x/ha-arpat-toscana/actions/workflows/validate.yml/badge.svg)](https://github.com/m0m4x/ha-arpat-toscana/actions/workflows/validate.yml)
 [![hassfest](https://github.com/m0m4x/ha-arpat-toscana/actions/workflows/hassfest.yml/badge.svg)](https://github.com/m0m4x/ha-arpat-toscana/actions/workflows/hassfest.yml)
 
-Custom integration per Home Assistant per acquisire i dati della **qualità dell'aria** pubblicati da **ARPAT - Agenzia regionale per la protezione ambientale della Toscana** tramite gli Open Data ufficiali.
+Custom integration per Home Assistant per acquisire i dati della **qualità dell'aria** pubblicati da **ARPAT - Agenzia regionale per la protezione ambientale della Toscana** tramite gli Open Data ufficiali della **Rete Regionale di Monitoraggio della Qualità dell'Aria**.
 
-La prima versione si concentra su:
+La versione 0.2.0 gestisce tre tipologie di dati, selezionabili indipendentemente:
 
-- **Dati orari Near Real Time (NRT)** della stazione scelta;
-- **Superamenti dei limiti giornalieri** riportati nell'ultimo bollettino disponibile.
+- **Dati orari Near Real Time (NRT)**;
+- **Indicatori giornalieri**;
+- **Superamenti limiti giornalieri**.
 
 > **Progetto indipendente e non ufficiale.** Non è sviluppato, approvato o supportato da ARPAT.
 
 ## Installazione con HACS
 
-Premi il pulsante seguente per aprire direttamente questo repository in HACS:
-
 [![Apri ARPAT Toscana in HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=m0m4x&repository=ha-arpat-toscana&category=integration)
 
-Dopo aver installato l'integrazione da HACS e riavviato Home Assistant:
+Dopo l'installazione e il riavvio di Home Assistant:
 
 [![Aggiungi ARPAT Toscana a Home Assistant](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=arpat_toscana)
 
@@ -27,90 +26,96 @@ Dopo aver installato l'integrazione da HACS e riavviato Home Assistant:
 
 Da **Impostazioni → Dispositivi e servizi → Aggiungi integrazione**, cerca **ARPAT Toscana**.
 
-L'integrazione scarica l'elenco aggiornato delle stazioni della rete regionale direttamente dall'Open Data ARPAT e mostra una selezione del tipo:
+Il config flow:
+
+1. scarica l'elenco aggiornato delle stazioni dalla struttura ufficiale della rete regionale ARPAT;
+2. permette di scegliere la stazione;
+3. permette di selezionare una o più tipologie di dati.
+
+Le tipologie disponibili sono:
 
 ```text
-Firenze (Firenze) — FI-LAVAGNINI · BENZENE, CO, NO2, PM10, PM2.5
-Capannori (Lucca) — LU-CAPANNORI · SO2, NO2, PM10, PM2.5
-...
+☑ Dati orari Near Real Time (NRT)
+☑ Indicatori giornalieri
+☑ Superamenti limiti giornalieri
 ```
 
-Non è necessario conoscere o inserire manualmente il codice numerico della centralina.
+Dopo la configurazione è possibile modificare la selezione da:
 
-È possibile configurare più stazioni; ogni stazione viene rappresentata come un dispositivo Home Assistant separato.
+**Impostazioni → Dispositivi e servizi → ARPAT Toscana → Configura**
 
-## Sensori NRT dinamici
+senza rimuovere e aggiungere nuovamente la stazione.
 
-Per la stazione selezionata l'integrazione crea automaticamente un'entità per ciascun parametro disponibile.
+## Dati orari Near Real Time (NRT)
 
-L'autodiscovery usa l'unione di:
+ARPAT descrive questo dataset come dati orari rilevati in una stazione specifica. Il parametro `last` restituisce l'ultimo valore campionato.
 
-1. `SENSORI` dichiarati dal dataset della rete;
-2. campi numerici effettivamente pubblicati nel payload NRT.
+La struttura JSON NRT contiene anche numerosi campi `null` che non implicano necessariamente che il relativo parametro sia pubblicato in NRT dalla stazione.
 
-Questo è importante perché ARPAT può pubblicare nel NRT misure aggiuntive che non risultano nell'array `SENSORI` della struttura di rete.
+Per questo motivo, dalla versione 0.2.0, l'integrazione **non usa più l'elenco generale `SENSORI` per creare le entità NRT**.
 
-Esempi di parametri gestiti:
+All'avvio viene analizzato il dataset NRT disponibile per la stazione e vengono creati solamente i parametri che hanno pubblicato almeno un valore numerico. Successivamente il normale polling utilizza l'endpoint `/last`.
 
-| Parametro | Unità |
-| --- | --- |
-| PM10 | µg/m³ |
-| PM2.5 | µg/m³ |
-| NO₂ | µg/m³ |
-| O₃ | µg/m³ |
-| SO₂ | µg/m³ |
-| CO | mg/m³ |
-| H₂S | µg/m³ |
-| Benzene | µg/m³ |
-| BB - Biomass Burning | % |
-| BC - Black Carbon | valore ARPAT, senza unità forzata |
-
-Per campi NRT futuri o non documentati viene comunque creata l'entità, ma senza inventarne unità o significato.
-
-Ogni sensore NRT espone inoltre attributi come:
-
-- stazione;
-- codice stazione;
-- comune e provincia;
-- zona;
-- tipo di zona e tipo di stazione;
-- validazione;
-- data di osservazione;
-- ora;
-- data di aggiornamento;
-- fonte.
-
-ARPAT specifica che i valori dei dati in tempo reale sono riferiti all'**ora solare**. L'integrazione conserva quindi i riferimenti temporali originali come metadati e non applica conversioni arbitrarie.
-
-## Superamenti giornalieri
-
-L'endpoint dei superamenti può restituire due forme diverse:
-
-- un oggetto con `superamenti: 0`, quando non risultano superamenti;
-- una lista di record, uno per ciascun superamento pubblicato.
-
-Per mantenere un'entità stabile nel tempo, l'integrazione crea:
+Esempio: se una stazione pubblica in NRT solamente NO₂ e O₃, vengono create solamente:
 
 ```text
-sensor.<stazione>_superamenti_giornalieri
+NO₂ NRT
+O₃ NRT
+```
+
+anche se nel tracciato JSON esistono campi come `PM10`, `PM2.5`, `SO2`, `CO`, `H2S` o `BENZENE` valorizzati a `null`.
+
+Se un parametro NRT realmente utilizzato dalla stazione restituisce `null` nell'ultimo campione, l'entità resta correttamente presente con stato **Sconosciuto** per quel campione; non viene riutilizzato un valore orario precedente come se fosse corrente.
+
+## Indicatori giornalieri
+
+Gli **Indicatori giornalieri** provengono dal **Bollettino regionale della qualità dell'aria**. ARPAT indica che i grafici degli indicatori giornalieri si basano sui dati dei bollettini con **validazione di primo livello**.
+
+Questo dataset è distinto dal NRT. Una stazione può quindi pubblicare, ad esempio, PM2.5 tra gli indicatori giornalieri pur non pubblicandolo nei dati orari NRT.
+
+Le entità vengono create dinamicamente sulla base della riga della stazione nel bollettino più recente.
+
+Esempi:
+
+```text
+PM10 indicatore giornaliero
+PM2.5 indicatore giornaliero
+NO₂ indicatore giornaliero
+```
+
+La codifica ARPAT viene interpretata così:
+
+- valore numerico → entità con valore;
+- `n.d.` → indicatore pertinente, ma dato non disponibile: entità presente con stato Sconosciuto;
+- `-` → parametro non pubblicato per quella stazione: nessuna entità.
+
+Il campo `PM2dot5` del bollettino viene normalizzato in Home Assistant come `PM2.5`.
+
+Il campo originale `CONTATORE_SUPERAMENTI`, quando presente, viene conservato come attributo dei sensori giornalieri ma non trasformato in una nuova entità finché non ne viene formalizzata separatamente la semantica.
+
+## Superamenti limiti giornalieri
+
+Viene creato un sensore persistente:
+
+```text
+Superamenti limiti giornalieri
 ```
 
 con:
 
-- **stato**: numero di superamenti nell'ultimo bollettino disponibile;
+- stato: numero di superamenti riportati nell'ultima pubblicazione disponibile;
 - `data_bollettino`: data di osservazione;
-- `dettaglio_superamenti`: elenco di parametro, sigla e valore per i superamenti presenti.
+- `dettaglio_superamenti`: parametro, sigla e valore degli eventuali superamenti.
 
-Il sensore non viene creato e rimosso in base agli eventi: rimane sempre lo stesso, così lo storico del Recorder è coerente anche nei giorni con valore `0`.
+Quando ARPAT non rileva superamenti, il servizio restituisce esplicitamente `superamenti: 0` e l'entità rimane a zero, mantenendo uno storico coerente nel Recorder.
 
-## Frequenza di aggiornamento
+## Frequenze di aggiornamento
 
-- NRT: interrogazione ogni **30 minuti**;
-- Superamenti giornalieri: aggiornamento al massimo ogni **2 ore**.
+- NRT: ogni **30 minuti**;
+- Indicatori giornalieri: al massimo ogni **2 ore**;
+- Superamenti limiti giornalieri: al massimo ogni **2 ore**.
 
-ARPAT dichiara che i dati NRT vengono aggiornati automaticamente su base oraria. Il polling a 30 minuti permette di acquisire rapidamente un nuovo campione senza interrogare inutilmente il servizio con frequenze elevate.
-
-Una sola acquisizione coordinata alimenta tutte le entità della stessa stazione tramite `DataUpdateCoordinator`.
+Se NRT non è selezionato, l'intero coordinator lavora con intervallo di 2 ore.
 
 ## Endpoint utilizzati
 
@@ -126,10 +131,22 @@ Struttura rete regionale:
 /rete_monitoraggio/rete_json/regionale
 ```
 
+Dati NRT disponibili per la stazione:
+
+```text
+/dati_orari_real_time/json_orari_nrt/[NOME_STAZIONE]
+```
+
 Ultimo dato NRT:
 
 ```text
 /dati_orari_real_time/json_orari_nrt/[NOME_STAZIONE]/last
+```
+
+Ultimo bollettino regionale / Indicatori giornalieri:
+
+```text
+/bollettini/bollettino_json/regionale
 ```
 
 Superamenti nell'ultimo bollettino per stazione:
@@ -142,13 +159,16 @@ Documentazione ARPAT:
 
 https://www.arpat.toscana.it/open-data/open-data-sulla-qualita-dellaria/
 
-## Validazione dei dati
+## Migrazione dalla 0.1.x
 
-I dati NRT non devono essere confusi con le serie storiche definitive.
+Le configurazioni esistenti vengono migrate automaticamente alla versione 2 del config entry mantenendo abilitate le due tipologie già gestite dalla 0.1.x:
 
-ARPAT distingue i dati validi a livello strumentale dai dati che hanno superato il primo livello di validazione operatore. Il payload NRT contiene il campo `VALIDAZIONE`, che viene mantenuto negli attributi delle entità.
+- NRT;
+- Superamenti limiti giornalieri.
 
-I dati storici consolidati, che hanno completato l'intero ciclo di validazione, possono differire dai valori NRT o dai dati del bollettino quotidiano.
+Gli **Indicatori giornalieri** possono poi essere abilitati da **Configura**.
+
+Le vecchie entità NRT della 0.1.x, che non distinguevano la tipologia di dataset nell'unique ID e potevano essere state create da campi sempre `null`, vengono rimosse dal registro entità durante il primo caricamento della nuova versione.
 
 ## Installazione manuale
 
@@ -166,19 +186,11 @@ in:
 
 Riavvia Home Assistant e aggiungi l'integrazione dalla UI.
 
-## Limiti della versione 0.1.0
-
-- viene utilizzata per la selezione delle stazioni la **rete regionale**;
-- sono importati esclusivamente NRT e superamenti giornalieri;
-- non vengono ancora importati bollettini completi, indicatori giornalieri/annuali o storico validato;
-- il campo NRT `BC` viene esposto senza unità forzata perché il tracciato JSON Open Data NRT non ne documenta esplicitamente l'unità;
-- la disponibilità dei dati dipende dai servizi pubblici ARPAT.
-
 ## Licenze e attribuzione
 
 Codice dell'integrazione: **MIT**.
 
-I dati ARPAT sono rilasciati con **Italian Open Data License v2.0 (IODL 2.0)**. ARPAT richiede, tra le altre condizioni, l'indicazione della fonte e che il riuso non suggerisca carattere di ufficialità o approvazione da parte dell'ente.
+I dati ARPAT sono rilasciati con **Italian Open Data License v2.0 (IODL 2.0)**.
 
 Fonte dati: **ARPAT - Agenzia regionale per la protezione ambientale della Toscana**.
 

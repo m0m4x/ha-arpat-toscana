@@ -8,7 +8,14 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import ArpatApi
-from .const import CONF_STATION, CONF_STATION_DATA, DOMAIN
+from .config_flow import get_enabled_data_types
+from .const import (
+    CONF_DATA_TYPES,
+    CONF_STATION,
+    CONF_STATION_DATA,
+    DOMAIN,
+    LEGACY_DEFAULT_DATA_TYPES,
+)
 from .coordinator import ArpatDataUpdateCoordinator
 
 PLATFORMS: list[Platform] = [Platform.SENSOR]
@@ -28,6 +35,7 @@ async def async_setup_entry(
         api,
         station,
         station_data,
+        get_enabled_data_types(entry),
     )
     await coordinator.async_config_entry_first_refresh()
 
@@ -53,3 +61,24 @@ async def async_unload_entry(
             hass.data.pop(DOMAIN, None)
 
     return unload_ok
+
+
+async def async_migrate_entry(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+) -> bool:
+    """Migrate configuration entries created by ARPAT Toscana 0.1.x."""
+    if entry.version == 1:
+        data = dict(entry.data)
+        data.setdefault(
+            CONF_DATA_TYPES,
+            list(LEGACY_DEFAULT_DATA_TYPES),
+        )
+
+        hass.config_entries.async_update_entry(
+            entry,
+            data=data,
+            version=2,
+        )
+
+    return True

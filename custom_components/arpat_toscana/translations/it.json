@@ -3,23 +3,51 @@
   "config": {
     "step": {
       "user": {
-        "title": "Seleziona una stazione ARPAT",
-        "description": "Seleziona una stazione della rete regionale della qualità dell'aria. I sensori NRT disponibili vengono creati automaticamente.",
+        "title": "Configura una stazione ARPAT",
+        "description": "Seleziona una stazione della Rete Regionale di Monitoraggio della Qualità dell'Aria e le tipologie di dati da acquisire.",
         "data": {
-          "station": "Stazione"
+          "station": "Stazione",
+          "data_types": "Tipologie di dati"
         },
         "data_description": {
-          "station": "Elenco ottenuto direttamente dalla struttura della rete di monitoraggio ARPAT."
+          "station": "Elenco ottenuto direttamente dalla struttura della rete di monitoraggio ARPAT.",
+          "data_types": "Puoi modificare successivamente la selezione da Configura senza rimuovere la stazione."
         }
       }
     },
     "error": {
       "cannot_connect": "Impossibile collegarsi al servizio Open Data ARPAT.",
       "invalid_station": "La stazione selezionata non è valida.",
-      "no_data": "La stazione non restituisce al momento dati NRT utilizzabili."
+      "no_data_types": "Seleziona almeno una tipologia di dati."
     },
     "abort": {
       "already_configured": "Questa stazione ARPAT è già configurata."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Tipologie di dati",
+        "description": "Scegli quali dataset ARPAT acquisire per questa stazione.",
+        "data": {
+          "data_types": "Tipologie di dati"
+        },
+        "data_description": {
+          "data_types": "La modifica ricarica automaticamente l'integrazione e aggiunge o rimuove le relative entità."
+        }
+      }
+    },
+    "error": {
+      "no_data_types": "Seleziona almeno una tipologia di dati."
+    }
+  },
+  "selector": {
+    "data_types": {
+      "options": {
+        "nrt": "Dati orari Near Real Time (NRT)",
+        "daily_indicators": "Indicatori giornalieri",
+        "daily_exceedances": "Superamenti limiti giornalieri"
+      }
     }
   }
 }

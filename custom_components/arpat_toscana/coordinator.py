@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 import logging
-from typing import Any
+from typing import Any, Iterable
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import (
@@ -14,47 +14,24 @@ from homeassistant.helpers.update_coordinator import (
 
 from .api import ArpatApi, ArpatApiError
 from .const import (
-    EXCEEDANCES_REFRESH_INTERVAL,
-    NRT_METADATA_FIELDS,
-    POLLUTANT_INFO,
-    UPDATE_INTERVAL,
+    DATA_TYPE_DAILY_EXCEEDANCES,
+    DATA_TYPE_DAILY_INDICATORS,
+    DATA_TYPE_NRT,
+    DAILY_UPDATE_INTERVAL,
+    NRT_UPDATE_INTERVAL,
+)
+from .parsers import (
+    current_nrt_values,
+    discover_nrt_parameters,
+    normalize_daily_indicators,
+    normalize_exceedances,
 )
 
 _LOGGER = logging.getLogger(__name__)
 
 
-def parse_numeric(value: Any) -> float | None:
-    """Convert an ARPAT numeric value to float when possible."""
-    if value is None or isinstance(value, bool):
-        return None
-
-    if isinstance(value, (int, float)):
-        return float(value)
-
-    text = str(value).strip()
-    if not text or text in {"-", "--", "null", "None"}:
-        return None
-
-    try:
-        return float(text.replace(",", "."))
-    except ValueError:
-        return None
-
-
-def _get_case_insensitive(
-    data: dict[str, Any],
-    *keys: str,
-) -> Any:
-    """Return a dict value using case-insensitive key matching."""
-    normalized = {str(key).lower(): value for key, value in data.items()}
-    for key in keys:
-        if key.lower() in normalized:
-            return normalized[key.lower()]
-    return None
-
-
 class ArpatDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
-    """Coordinate ARPAT NRT and daily exceedance data."""
+    """Coordinate selected ARPAT datasets for one station."""
 
     def __init__(
         self,
@@ -62,171 +39,213 @@ class ArpatDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         api: ArpatApi,
         station: str,
         station_data: dict[str, Any],
+        enabled_data_types: Iterable[str],
     ) -> None:
         """Initialize the coordinator."""
+        self.enabled_data_types = frozenset(enabled_data_types)
+        update_interval = (
+            NRT_UPDATE_INTERVAL
+            if DATA_TYPE_NRT in self.enabled_data_types
+            else DAILY_UPDATE_INTERVAL
+        )
+
         super().__init__(
             hass,
             _LOGGER,
             name=f"ARPAT Toscana {station}",
-            update_interval=UPDATE_INTERVAL,
+            update_interval=update_interval,
         )
+
         self.api = api
         self.station = station
         self.station_data = station_data
-        self._last_exceedances_attempt: datetime | None = None
+
+        self._nrt_initialized = False
+        self._nrt_parameters: set[str] = set()
+        self._nrt: dict[str, Any] = {
+            "available": False,
+            "record": {},
+            "measurements": {},
+        }
+
+        self._daily_indicator_parameters: set[str] = set()
+        self._daily_indicators: dict[str, Any] = {
+            "available": False,
+            "record": {},
+            "measurements": {},
+        }
+        self._last_daily_indicators_attempt: datetime | None = None
+
         self._exceedances: dict[str, Any] = {
             "available": False,
             "count": None,
             "date": None,
             "records": [],
         }
+        self._last_exceedances_attempt: datetime | None = None
 
     async def _async_update_data(self) -> dict[str, Any]:
-        """Fetch the latest ARPAT data."""
-        try:
-            nrt = await self.api.async_get_nrt_last(self.station)
-        except ArpatApiError as err:
-            raise UpdateFailed(
-                f"Unable to update ARPAT NRT data for {self.station}"
-            ) from err
-
+        """Fetch only the ARPAT dataset types selected by the user."""
         now = datetime.now(UTC)
-        if self._must_refresh_exceedances(now):
+        attempted = 0
+        succeeded = 0
+
+        if DATA_TYPE_NRT in self.enabled_data_types:
+            attempted += 1
+            try:
+                await self._async_update_nrt()
+                succeeded += 1
+            except ArpatApiError as err:
+                self._nrt["available"] = False
+                _LOGGER.warning(
+                    "Unable to update ARPAT NRT data for %s: %s",
+                    self.station,
+                    err,
+                )
+
+        if (
+            DATA_TYPE_DAILY_INDICATORS in self.enabled_data_types
+            and self._must_refresh(
+                self._last_daily_indicators_attempt,
+                now,
+            )
+        ):
+            attempted += 1
+            self._last_daily_indicators_attempt = now
+            try:
+                await self._async_update_daily_indicators()
+                succeeded += 1
+            except ArpatApiError as err:
+                self._daily_indicators["available"] = False
+                _LOGGER.warning(
+                    "Unable to update ARPAT daily indicators for %s: %s",
+                    self.station,
+                    err,
+                )
+
+        if (
+            DATA_TYPE_DAILY_EXCEEDANCES in self.enabled_data_types
+            and self._must_refresh(
+                self._last_exceedances_attempt,
+                now,
+            )
+        ):
+            attempted += 1
             self._last_exceedances_attempt = now
             try:
                 payload = await self.api.async_get_daily_exceedances(
                     self.station
                 )
-                self._exceedances = self._normalize_exceedances(payload)
+                self._exceedances = normalize_exceedances(payload)
+                succeeded += 1
             except ArpatApiError as err:
-                # I dati NRT restano utili anche se il bollettino giornaliero
-                # è temporaneamente indisponibile.
+                self._exceedances["available"] = False
                 _LOGGER.warning(
                     "Unable to update ARPAT daily exceedances for %s: %s",
                     self.station,
                     err,
                 )
 
-        pollutants = self._discover_pollutants(nrt)
-
-        return {
-            "nrt": nrt,
-            "pollutants": tuple(sorted(pollutants)),
-            "exceedances": self._exceedances,
-        }
-
-    def _must_refresh_exceedances(self, now: datetime) -> bool:
-        """Return True when daily exceedances should be refreshed."""
-        if self._last_exceedances_attempt is None:
-            return True
-        return (
-            now - self._last_exceedances_attempt
-            >= EXCEEDANCES_REFRESH_INTERVAL
-        )
-
-    def _discover_pollutants(self, nrt: dict[str, Any]) -> set[str]:
-        """Discover station measurements from network metadata and NRT."""
-        pollutants: set[str] = set()
-
-        declared = self.station_data.get("SENSORI", [])
-        if isinstance(declared, list):
-            for item in declared:
-                name = str(item).strip().upper()
-                if name:
-                    pollutants.add(name)
-
-        for key, value in nrt.items():
-            name = str(key).strip().upper()
-
-            if not name or name in NRT_METADATA_FIELDS:
-                continue
-
-            # Campi conosciuti vengono pubblicati anche se il campione corrente
-            # è null; campi futuri/sconosciuti vengono aggiunti se numerici.
-            if name in POLLUTANT_INFO or parse_numeric(value) is not None:
-                pollutants.add(name)
-
-        return pollutants
-
-    @staticmethod
-    def _normalize_exceedances(
-        payload: dict[str, Any] | list[dict[str, Any]],
-    ) -> dict[str, Any]:
-        """Normalize the two ARPAT exceedance response shapes."""
-        if isinstance(payload, dict):
-            count_raw = _get_case_insensitive(payload, "superamenti")
-
-            # Risposta documentata quando non ci sono superamenti.
-            if count_raw is not None:
-                count = parse_numeric(count_raw)
-                date = _get_case_insensitive(
-                    payload,
-                    "data_osservazione",
-                    "DATA_OSSERVAZIONE",
-                )
-
-                return {
-                    "available": True,
-                    "count": int(count) if count is not None else 0,
-                    "date": date,
-                    "records": [],
-                }
-
-            # Difesa da un eventuale singolo record restituito come oggetto.
-            if (
-                _get_case_insensitive(payload, "NOME_PARAMETRO") is not None
-                or _get_case_insensitive(payload, "SIGLA_PARAMETRO") is not None
-            ):
-                payload = [payload]
-            else:
-                return {
-                    "available": False,
-                    "count": None,
-                    "date": None,
-                    "records": [],
-                }
-
-        if not payload:
-            return {
-                "available": False,
-                "count": None,
-                "date": None,
-                "records": [],
-            }
-
-        records: list[dict[str, Any]] = []
-        observation_date: Any = None
-
-        for item in payload:
-            date = _get_case_insensitive(item, "DATA_OSSERVAZIONE")
-            if observation_date is None:
-                observation_date = date
-
-            raw_value = _get_case_insensitive(item, "VALORE")
-            numeric_value = parse_numeric(raw_value)
-
-            records.append(
-                {
-                    "parametro": _get_case_insensitive(
-                        item,
-                        "NOME_PARAMETRO",
-                    ),
-                    "sigla": _get_case_insensitive(
-                        item,
-                        "SIGLA_PARAMETRO",
-                    ),
-                    "valore": (
-                        numeric_value
-                        if numeric_value is not None
-                        else raw_value
-                    ),
-                    "data_osservazione": date,
-                }
+        if attempted and succeeded == 0 and not self._has_cached_data():
+            raise UpdateFailed(
+                f"Unable to update selected ARPAT datasets for {self.station}"
             )
 
         return {
-            "available": True,
-            "count": len(records),
-            "date": observation_date,
-            "records": records,
+            "enabled_data_types": tuple(sorted(self.enabled_data_types)),
+            "nrt": self._nrt,
+            "daily_indicators": self._daily_indicators,
+            "exceedances": self._exceedances,
         }
+
+    async def _async_update_nrt(self) -> None:
+        """Update NRT and discover only parameters actually published NRT."""
+        if not self._nrt_initialized:
+            try:
+                history = await self.api.async_get_nrt_history(self.station)
+            except ArpatApiError as err:
+                # Il /last resta sufficiente per continuare. La discovery si
+                # completerà con i valori numerici che appariranno nei refresh.
+                _LOGGER.warning(
+                    "Unable to load ARPAT NRT history for %s: %s",
+                    self.station,
+                    err,
+                )
+            else:
+                self._nrt_parameters.update(
+                    discover_nrt_parameters(history)
+                )
+
+            self._nrt_initialized = True
+
+        record = await self.api.async_get_nrt_last(self.station)
+
+        # Se compare in futuro un nuovo parametro NRT numerico, viene aggiunto
+        # dinamicamente senza dover aggiornare l'integrazione.
+        self._nrt_parameters.update(discover_nrt_parameters([record]))
+
+        self._nrt = {
+            "available": True,
+            "record": record,
+            "measurements": current_nrt_values(
+                record,
+                sorted(self._nrt_parameters),
+            ),
+        }
+
+    async def _async_update_daily_indicators(self) -> None:
+        """Update daily indicators from the latest regional bulletin."""
+        record = await self.api.async_get_daily_indicators(self.station)
+        current = normalize_daily_indicators(record)
+
+        # Una volta individuato un indicatore pertinente alla stazione,
+        # manteniamo l'entità stabile anche se un bollettino successivo lo
+        # riporta temporaneamente come n.d. o non numerico.
+        self._daily_indicator_parameters.update(current)
+
+        measurements = {
+            parameter: current.get(parameter)
+            for parameter in sorted(self._daily_indicator_parameters)
+        }
+
+        self._daily_indicators = {
+            "available": True,
+            "record": record,
+            "measurements": measurements,
+        }
+
+    @staticmethod
+    def _must_refresh(
+        last_attempt: datetime | None,
+        now: datetime,
+    ) -> bool:
+        """Return True when a daily dataset should be refreshed."""
+        if last_attempt is None:
+            return True
+
+        return now - last_attempt >= DAILY_UPDATE_INTERVAL
+
+    def _has_cached_data(self) -> bool:
+        """Return True when at least one selected dataset has usable cache."""
+        if (
+            DATA_TYPE_NRT in self.enabled_data_types
+            and self._nrt.get("record")
+        ):
+            return True
+
+        if (
+            DATA_TYPE_DAILY_INDICATORS in self.enabled_data_types
+            and self._daily_indicators.get("record")
+        ):
+            return True
+
+        if (
+            DATA_TYPE_DAILY_EXCEEDANCES in self.enabled_data_types
+            and (
+                self._exceedances.get("date") is not None
+                or self._exceedances.get("count") is not None
+            )
+        ):
+            return True
+
+        return False
