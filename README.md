@@ -40,6 +40,8 @@ Le tipologie disponibili sono:
 ☑ Superamenti limiti giornalieri
 ```
 
+![Configurazione di una stazione ARPAT in Home Assistant](docs/images/config-flow.png)
+
 Dopo la configurazione è possibile modificare la selezione da:
 
 **Impostazioni → Dispositivi e servizi → ARPAT Toscana → Configura**
